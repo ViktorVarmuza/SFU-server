@@ -6,15 +6,44 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Document</title>
 </head>
+<style>
+    video {
+        transform: scaleX(-1);
+        /* horizontální zrcadlení */
+    }
+</style>
 
 <body>
 
     <h1>ahojky jak se máte?</h1>
+    <h2 class="id"></h2>
+    <div class="video-grid"></div>
+
+
+
+
+
+
+
+
+
 </body>
 
 <script>
     const ROOM_ID = "<%= roomId %>";
+    const USER_ID = "<%= userId %>";
 </script>
+
+
+<script src="/socket.io/socket.io.js"></script>
+
+<script src="/script2.js"></script>
+
+
+
+
+
+
 
 
 
