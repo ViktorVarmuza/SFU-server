@@ -1,7 +1,13 @@
 const express = require('express');
 const app = express();
 const server = require('http').Server(app);
-const io = require('socket.io')(server);
+const io = require('socket.io')(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+;
 const { v4: uuidV4 } = require('uuid');
 const mediasoup = require("mediasoup");
 
@@ -9,8 +15,13 @@ const mediasoup = require("mediasoup");
 
 const onlineUsers = new Map();
 const rooms = new Map();
-let worker;
 
+let worker
+let router
+let producerTransport
+let consumerTransport
+let producer
+let consumer
 
 const mediaCodecs = [
     {
@@ -26,25 +37,30 @@ const mediaCodecs = [
     }
 ];
 
-(async () => {
+
+server.listen(3000, async () => {
+    console.log('Server running on port 3000');
     worker = await mediasoup.createWorker({
         logLevel: 'error',
         rtcMinPort: 2000,
         rtcMaxPort: 2020
+
     })
 
-    server.listen(3000, () => {
-        console.log('Server running on port 3000');
+    worker.on('died', error => {
+        // This implies something serious happened, so kill the application
+        console.error('mediasoup worker has died')
+        setTimeout(() => process.exit(1), 2000) // exit in 2 seconds
     })
+})
 
-})();
 
 app.set('view engine', 'ejs');
 
 // Sdílení UMD build z node_modules
 app.use('/libs', express.static('node_modules/mediasoup-client/umd'));
 
-app.use(express.static('public'));
+app.use(express.static('src'));
 
 
 app.get('/', (req, res) => {
@@ -140,7 +156,7 @@ io.on('connection', socket => {
         callback(room.router.rtpCapabilities);
     });
 
-    socket.on('createWebRtcTransport', async ({ roomId }, callback) => {
+    socket.on('createWebRtcTransport', async ({ roomId, direction }, callback) => {
         const room = rooms.get(roomId);
 
         if (!room) return;
@@ -152,7 +168,7 @@ io.on('connection', socket => {
             preferUdp: true,
             appData: {
                 userId: socket.userId,
-                direction: 'send'
+                direction: direction
             }
         });
 
@@ -169,6 +185,37 @@ io.on('connection', socket => {
 
     })
 
+    socket.on('connectTransport', async ({ transportId, dtlsParameters, roomdId }, callback) => {
+        const room = rooms.get(roomdId);
+        const transport = room.transports.get(transportId);
+
+        await transport.connect({ dtlsParameters });
+        callback();
+
+    });
+
+    socket.on('produce', async ({ transportId, kind, rtpParameters, roomId, userId }, callback) => {
+        const room = rooms.get(roomId);
+        const transport = room.transports.get(transportId);
+
+        const producer = await transport.produce({
+            kind,
+            rtpParameters,
+            appData: { userId: userId }
+        });
+
+        room.producers.set(producer.id, producer);
+
+        socket.to(socket.roomId).emit('new-producer', {
+            producerId: producer.id,
+            userId: userId
+        });
+
+        callback({ producerId: producer.id });
+
+
+    });
+
 
 
     socket.on('leave-room', ({ roomId, userId }) => {
@@ -178,10 +225,7 @@ io.on('connection', socket => {
             socket.to(roomId).emit('user-disconnected', userId);
         }
 
-
     })
-
-
 
 
 
