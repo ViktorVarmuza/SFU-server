@@ -16,12 +16,7 @@ const mediasoup = require("mediasoup");
 const onlineUsers = new Map();
 const rooms = new Map();
 
-let worker
-let router
-let producerTransport
-let consumerTransport
-let producer
-let consumer
+let worker;
 
 const mediaCodecs = [
     {
@@ -185,8 +180,8 @@ io.on('connection', socket => {
 
     })
 
-    socket.on('connectTransport', async ({ transportId, dtlsParameters, roomdId }, callback) => {
-        const room = rooms.get(roomdId);
+    socket.on('connectTransport', async ({ transportId, dtlsParameters, roomId }, callback) => {
+        const room = rooms.get(roomId);
         const transport = room.transports.get(transportId);
 
         await transport.connect({ dtlsParameters });
@@ -194,27 +189,68 @@ io.on('connection', socket => {
 
     });
 
-    socket.on('produce', async ({ transportId, kind, rtpParameters, roomId, userId }, callback) => {
-        const room = rooms.get(roomId);
+    socket.on('produce', async ({ transportId, kind, rtpParameters }, callback) => {
+        const room = rooms.get(socket.roomId);
+
+        if (!room) return;
+
         const transport = room.transports.get(transportId);
+        if (!transport) return;
 
         const producer = await transport.produce({
             kind,
             rtpParameters,
-            appData: { userId: userId }
+            appData: { userId: socket.userId }
         });
 
         room.producers.set(producer.id, producer);
 
         socket.to(socket.roomId).emit('new-producer', {
             producerId: producer.id,
-            userId: userId
+            userId: socket.userId
         });
 
         callback({ producerId: producer.id });
-
-
     });
+
+
+    socket.on('consume', async ({ producerId, rtpCapabilities, roomId }, callback) => {
+
+        const room = rooms.get(roomId);
+        if (!room) return;
+
+        const router = room.router;
+
+        if (!router.canConsume({ producerId, rtpCapabilities })) {
+            return callback({ error: 'Cannot consume' });
+        }
+
+        // Najdi recv transport patřící tomuto uživateli
+        const transport = Array.from(room.transports.values()).find(t =>
+            t.appData.userId === socket.userId &&
+            t.appData.direction === 'recv'
+        );
+
+        if (!transport) {
+            return callback({ error: 'Recv transport not found' });
+        }
+
+        const consumer = await transport.consume({
+            producerId,
+            rtpCapabilities,
+            paused: false
+        });
+
+        room.consumers.set(consumer.id, consumer);
+
+        callback({
+            id: consumer.id,
+            producerId,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters
+        });
+    });
+
 
 
 

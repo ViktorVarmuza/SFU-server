@@ -4,20 +4,20 @@ const socket = io('http://localhost:3000', {
 });
 
 
-
 const ms = getMediaSoupClient();
 const device = createDevice();
 
 const videoGrid = document.querySelector('.video-grid');
 const roomIdDisplay = document.querySelector('.id');
 
-
+console.log(USER_ID);
 
 
 
 
 const consumers = new Map(); // consumerId -> consumer
 const videos = new Map()
+let recvTransport;
 
 
 
@@ -54,12 +54,21 @@ async function main() {
         'createWebRtcTransport',
         { roomId: ROOM_ID, direction: 'send' }
     );
+
+    const recvTransportParams = await socket.emitWithAck(
+        'createWebRtcTransport',
+        { roomId: ROOM_ID, direction: 'recv' }
+    );
+
+
+
     //vytvoreni transportu pro send 
     const sendTransport = await createSendTransport(sendTransportParams);
+    recvTransport = await createRecvTransport(recvTransportParams);
 
     //producing video a audio tracku
     await sendTransport.produce({ track: videoTrack });
-    await sendTransport.produce({ track: audioTrack});
+    await sendTransport.produce({ track: audioTrack });
 
 
 
@@ -83,6 +92,42 @@ async function sockets() {
 
     })
 
+    socket.on('new-producer', async ({ producerId, userId }) => {
+        if (userId === USER_ID) return;
+
+        // 1️⃣ požádej server o consumer parametry
+        const data = await socket.emitWithAck('consume', {
+            roomId: ROOM_ID,
+            producerId,
+            rtpCapabilities: device.rtpCapabilities
+        });
+
+        if (data.error) {
+            console.error(data.error);
+            return;
+        }
+
+        // 2️⃣ vytvoř consumer na klientovi
+        const consumer = await recvTransport.consume({
+            id: data.id,
+            producerId: data.producerId,
+            kind: data.kind,
+            rtpParameters: data.rtpParameters
+        });
+
+        consumers.set(consumer.id, consumer);
+
+        // 3️⃣ vytvoř MediaStream
+        const stream = new MediaStream();
+        stream.addTrack(consumer.track);
+
+        console.log('Received new track from user ' + userId);
+        console.log('stream', stream);
+        // 4️⃣ přidej video do DOM
+        //addVideo(stream, userId);
+    });
+
+
 
 }
 
@@ -94,7 +139,7 @@ async function createSendTransport(params) {
         socket.emit('connectTransport', {
             transportId: sendTransport.id,
             dtlsParameters: dtlsParameters,
-            roomdId: ROOM_ID
+            roomId: ROOM_ID
         }, callback);
     });
 
@@ -113,6 +158,21 @@ async function createSendTransport(params) {
     return sendTransport;
 }
 
+async function createRecvTransport(params) {
+    const recvTransport = device.createRecvTransport(params);
+
+    recvTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
+        socket.emit('connectTransport', {
+            transportId: recvTransport.id,
+            dtlsParameters,
+            roomId: ROOM_ID
+        }, callback);
+    });
+
+    return recvTransport;
+
+
+}
 
 
 
