@@ -16,6 +16,8 @@ const videos = new Map();    // producerId -> video element
 roomIdDisplay.textContent = ROOM_ID;
 
 
+const producers = new Map();
+
 let sendTransport;
 let recvTransport;
 
@@ -28,6 +30,10 @@ async function getUserMedia() {
 
 async function main() {
     const stream = await getUserMedia();
+
+    sockets(stream);
+    if (!stream) return;
+
 
     const rtpCapabilities = await socket.emitWithAck(
         'getRtpCapabilities',
@@ -83,13 +89,12 @@ async function main() {
     });
 
     for (const producerId of producers) {
+
         await consume(producerId);
+        
     }
 
-    await socket.emitWithAck('resume-consumer', {
-        roomId: ROOM_ID,
-        consumerId: consumer.id
-    });
+
 
 
     const videoTrack = stream.getVideoTracks()[0];
@@ -115,8 +120,7 @@ async function main() {
 
 
 
-    sockets(stream);
-    if (!stream) return;
+
 
     const myVideo = document.createElement('video');
     myVideo.srcObject = stream;

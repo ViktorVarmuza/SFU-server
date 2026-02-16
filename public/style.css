@@ -1,0 +1,112 @@
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: Arial, sans-serif;
+}
+
+body {
+    background: #0f172a;
+    color: white;
+    height: 100vh;
+}
+
+.call-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* ===== VIDEO GRID ===== */
+.video-grid {
+    width: 95%;
+    margin: auto;
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 10px;
+    padding: 10px;
+}
+
+/* ===== VIDEO TILE ===== */
+.video-tile {
+    position: relative;
+    border: solid 2px rgb(0, 0, 0);
+    border-radius: 5px;
+    background: #020617;
+    border-radius: 12px;
+    overflow: hidden;
+    max-height: 600px;
+    max-width: 800px;
+    margin: auto;
+}
+
+/* VIDEO */
+.video-tile video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    background: black;
+}
+
+/* AVATAR (skrytý defaultně) */
+.video-tile .avatar {
+    margin: auto;
+    display: none;
+    opacity: 0.9;
+}
+
+/* KDYŽ JE KAMERA VYPNUTÁ */
+.video-tile.camera-off video {
+    display: none;
+}
+
+
+.video-tile.camera-off .avatar {
+    display: block;
+}
+
+/* Jméno uživatele */
+.username {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.6);
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    z-index: 10;
+}
+
+/* ===== CONTROLS ===== */
+.controls {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    padding: 15px;
+    background: #020617;
+}
+
+.control-btn {
+    width: 55px;
+    height: 55px;
+    border-radius: 50%;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    background: #1e293b;
+    color: white;
+    transition: background 0.2s;
+}
+
+.control-btn:hover {
+    background: #334155;
+}
+
+.control-btn.end {
+    background: #dc2626;
+}
+
+.control-btn.end:hover {
+    background: #b91c1c;
+}

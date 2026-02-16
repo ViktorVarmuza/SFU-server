@@ -53,8 +53,7 @@ server.listen(3000, async () => {
 app.set('view engine', 'ejs');
 
 // Sdílení UMD build z node_modules
-app.use('/libs', express.static('node_modules/mediasoup-client/umd'));
-
+app.use('/style', express.static('public'));
 app.use(express.static('src'));
 
 
@@ -157,7 +156,7 @@ io.on('connection', socket => {
         if (!room) return;
 
         const transport = await room.router.createWebRtcTransport({
-            listenIps: [{ ip: '0.0.0.0', announcedIp: null }],
+            listenIps: [{ ip: '0.0.0.0', announcedIp: '10.0.0.147' }],
             enableUdp: true,
             enableTcp: true,
             preferUdp: true,
@@ -250,6 +249,25 @@ io.on('connection', socket => {
             rtpParameters: consumer.rtpParameters
         });
     });
+
+    socket.on('getAllProducers', ({ roomId }, callback) => {
+        const room = rooms.get(roomId);
+        if (!room) return callback([]);
+
+        const producerList = [];
+
+        for (const producer of room.producers.values()) {
+            if (producer.appData.userId !== socket.userId) {
+                producerList.push({
+                    producerId: producer.id,
+                    userId: producer.appData.userId
+                });
+            }
+        }
+
+        callback(producerList);
+    });
+
 
 
 
