@@ -42,6 +42,7 @@ server.listen(3000, async () => {
 
     })
 
+
     worker.on('died', error => {
         // This implies something serious happened, so kill the application
         console.error('mediasoup worker has died')
@@ -65,6 +66,7 @@ async function createRoom(roomId, roomPath) {
     const router = await worker.createRouter({
         mediaCodecs
     });
+
 
     rooms.set(roomId, {
         roomPath: roomPath,
@@ -130,18 +132,30 @@ io.on('connection', socket => {
         });
     })
 
-    socket.on('join-room', ({ roomId, userId }) => {
+    socket.on('join-room', ({ roomId, userId }, callback) => {
+
         socket.join(roomId);
+        const room = rooms.get(roomId);
+
+        let viewer = false;
+        if (room.users.has(userId)) {
+            viewer = true;
+        }
 
         socket.userId = userId;
         socket.roomId = roomId;
-        const room = rooms.get(roomId);
+        socket.isViewer = viewer;
 
-        if (room) {
+        if (!viewer) {
             room.users.add(userId);
             socket.to(roomId).emit('user-connected', userId);
         }
-    })
+
+
+        if (typeof callback === 'function') {
+            callback({ viewer });
+        }
+    });
 
     socket.on('getRtpCapabilities', ({ roomId }, callback) => {
         const room = rooms.get(roomId);
@@ -196,6 +210,16 @@ io.on('connection', socket => {
         const transport = room.transports.get(transportId);
         if (!transport) return;
 
+        const alreadyProducing = Array.from(room.producers.values()).some(
+            p => p.appData.userId === socket.userId && p.kind === kind
+        );
+
+        if (alreadyProducing) {
+            return callback({ error: 'User already producing this kind' });
+        }
+
+
+
         const producer = await transport.produce({
             kind,
             rtpParameters,
@@ -224,7 +248,6 @@ io.on('connection', socket => {
             return callback({ error: 'Cannot consume' });
         }
 
-        // Najdi recv transport patřící tomuto uživateli
         const transport = Array.from(room.transports.values()).find(t =>
             t.appData.userId === socket.userId &&
             t.appData.direction === 'recv'
@@ -233,6 +256,8 @@ io.on('connection', socket => {
         if (!transport) {
             return callback({ error: 'Recv transport not found' });
         }
+
+        const producer = room.producers.get(producerId);
 
         const consumer = await transport.consume({
             producerId,
@@ -246,7 +271,8 @@ io.on('connection', socket => {
             id: consumer.id,
             producerId,
             kind: consumer.kind,
-            rtpParameters: consumer.rtpParameters
+            rtpParameters: consumer.rtpParameters,
+            userId: producer.appData.userId   // 🔥 důležité
         });
     });
 
@@ -268,18 +294,43 @@ io.on('connection', socket => {
         callback(producerList);
     });
 
-
-
-
-
-    socket.on('leave-room', ({ roomId, userId }) => {
+    socket.on('resume-consumer', async ({ roomId, consumerId }, callback) => {
         const room = rooms.get(roomId);
-        if (room) {
-            room.users.delete(userId);
-            socket.to(roomId).emit('user-disconnected', userId);
-        }
+        if (!room) return;
 
-    })
+        const consumer = room.consumers.get(consumerId);
+        if (!consumer) return;
+
+        await consumer.resume();
+        callback();
+    });
+
+
+
+    socket.on('disconnect', () => {
+
+        const { roomId, userId } = socket;
+        if (!roomId) return;
+
+        const room = rooms.get(roomId);
+        if (!room) return;
+
+        // Zavřít mediasoup věci
+        if (socket.producer) socket.producer.close();
+        if (socket.sendTransport) socket.sendTransport.close();
+        if (socket.recvTransport) socket.recvTransport.close();
+
+        room.users.delete(userId);
+
+        socket.to(roomId).emit('user-disconnected', userId);
+
+        // Pokud je room prázdná → smazat
+        if (room.users.size === 0) {
+            room.router.close();
+            rooms.delete(roomId);
+            console.log('Room removed');
+        }
+    });
 
 
 

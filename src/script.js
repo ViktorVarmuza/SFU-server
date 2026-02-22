@@ -28,12 +28,15 @@ async function getUserMedia() {
     });
 }
 
-async function main() {
+function waitForEvent(socket, event) {
+    return new Promise(resolve => {
+        socket.once(event, resolve);
+    });
+}
+
+async function Creator() {
     const stream = await getUserMedia();
-
-    sockets(stream);
     if (!stream) return;
-
 
     const rtpCapabilities = await socket.emitWithAck(
         'getRtpCapabilities',
@@ -42,16 +45,12 @@ async function main() {
 
     await device.load({ routerRtpCapabilities: rtpCapabilities });
 
-
-    console.log('RTP Capabilities:' + JSON.stringify(rtpCapabilities));
-
     const sendTransportParams = await socket.emitWithAck(
         'createWebRtcTransport',
         { roomId: ROOM_ID, direction: 'send' }
     );
 
     sendTransport = device.createSendTransport(sendTransportParams);
-
 
     sendTransport.on('connect', ({ dtlsParameters }, callback, errback) => {
         socket.emit(
@@ -64,7 +63,6 @@ async function main() {
             callback
         );
     });
-
     sendTransport.on(
         'produce',
         async ({ kind, rtpParameters }, callback, errback) => {
@@ -84,14 +82,14 @@ async function main() {
             }
         }
     );
-    const producers = await socket.emitWithAck('getProducers', {
+    const producers = await socket.emitWithAck('getAllProducers', {
         roomId: ROOM_ID
     });
 
-    for (const producerId of producers) {
 
+
+    for (const { producerId } of producers) {
         await consume(producerId);
-        
     }
 
 
@@ -110,7 +108,7 @@ async function main() {
         track: audioTrack
     });
 
-
+    socket.off('new-producer');
     socket.on('new-producer', async ({ producerId }) => {
         if (videos.has(producerId)) return;
         await consume(producerId);
@@ -132,8 +130,42 @@ async function main() {
     videoGrid.appendChild(myVideo);
 }
 
-function sockets(stream) {
-    socket.emit('join-room', { roomId: ROOM_ID, userId: USER_ID });
+async function Viewer() {
+
+    const rtpCapabilities = await socket.emitWithAck(
+        'getRtpCapabilities',
+        { roomId: ROOM_ID }
+    );
+
+    await device.load({ routerRtpCapabilities: rtpCapabilities });
+
+    const producers = await socket.emitWithAck('getAllProducers', {
+        roomId: ROOM_ID
+    });
+
+    for (const { producerId } of producers) {
+        await consume(producerId);
+    }
+
+    socket.off('new-producer');
+    socket.on('new-producer', async ({ producerId }) => {
+        if (videos.has(producerId)) return;
+        await consume(producerId);
+    });
+}
+
+
+async function sockets() {
+    const viewer = await socket.emitWithAck('join-room', { roomId: ROOM_ID, userId: USER_ID })
+
+    console.log('Jsem viewer?', viewer);
+
+    if (!viewer) {
+        await Creator();
+    } else {
+        await Viewer();
+    }
+
 
 
     socket.on('user-connected', (userId) => {
@@ -143,10 +175,28 @@ function sockets(stream) {
 
 
     socket.on('user-disconnected', (userId) => {
-        console.log('User disconnected: ' + userId);
+        console.log("user discconected", userId);
 
-    })
+
+        for (const [producerId, video] of videos.entries()) {
+            console.log(producerId,"----", video)
+
+            if (String(video.dataset.userId) === String(userId)){
+                video.srcObject = null;
+                video.remove();
+                videos.delete(producerId);
+            }
+        }
+
+        for (const [consumerId, consumer] of consumers.entries()) {
+            if (consumer.appData?.userId === userId) {
+                consumer.close();
+                consumers.delete(consumerId);
+            }
+        }
+    });
 }
+
 
 window.addEventListener('beforeunload', () => {
     socket.emit('leave-room', { roomId: ROOM_ID, userId: USER_ID });
@@ -171,7 +221,6 @@ async function consume(producerId) {
             }, callback);
         });
     }
-
     const data = await socket.emitWithAck('consume', {
         roomId: ROOM_ID,
         transportId: recvTransport.id,
@@ -180,11 +229,16 @@ async function consume(producerId) {
     });
 
     const consumer = await recvTransport.consume(data);
-    consumers.set(consumer.id, consumer);
 
+    // 👇 uložíme userId
+    consumer.appData = { userId: data.userId };
+
+    consumers.set(consumer.id, consumer);
     // ▶️ STREAM
     const stream = new MediaStream();
     stream.addTrack(consumer.track);
+
+    console.log("video-data-id:", data.userId);
 
     // ▶️ VIDEO ELEMENT
     const video = document.createElement('video');
@@ -195,7 +249,7 @@ async function consume(producerId) {
     // audio jen u remote videí
     video.muted = false;
 
-    video.dataset.producerId = producerId;
+    video.dataset.userId = data.userId;
 
     videoGrid.appendChild(video);
     videos.set(producerId, video);
@@ -208,4 +262,4 @@ async function consume(producerId) {
 }
 
 
-main();
+await sockets();
