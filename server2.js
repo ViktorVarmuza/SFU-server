@@ -36,10 +36,10 @@ const mediaCodecs = [
 server.listen(3000, async () => {
     console.log('Server running on port 3000');
     worker = await mediasoup.createWorker({
-        logLevel: 'error',
+        logLevel: "debug",
+        logTags: ["info", "ice", "dtls", "rtp", "rtcp"],
         rtcMinPort: 2000,
         rtcMaxPort: 2020
-
     })
 
 
@@ -170,7 +170,10 @@ io.on('connection', socket => {
         if (!room) return;
 
         const transport = await room.router.createWebRtcTransport({
-            listenIps: [{ ip: '0.0.0.0', announcedIp: '10.0.0.147' }],
+            listenIps: [{
+                ip: '127.0.0.1',
+                announcedIp: null
+            }],
             enableUdp: true,
             enableTcp: true,
             preferUdp: true,
@@ -262,7 +265,7 @@ io.on('connection', socket => {
         const consumer = await transport.consume({
             producerId,
             rtpCapabilities,
-            paused: false
+            paused: true
         });
 
         room.consumers.set(consumer.id, consumer);
@@ -308,23 +311,42 @@ io.on('connection', socket => {
 
 
     socket.on('disconnect', () => {
-
         const { roomId, userId } = socket;
-        if (!roomId) return;
+        if (!roomId || !rooms.has(roomId)) return;
 
         const room = rooms.get(roomId);
-        if (!room) return;
 
-        // Zavřít mediasoup věci
-        if (socket.producer) socket.producer.close();
-        if (socket.sendTransport) socket.sendTransport.close();
-        if (socket.recvTransport) socket.recvTransport.close();
+        // 1️⃣ Zavřít producery uživatele
+        for (const [id, producer] of room.producers.entries()) {
+            if (producer.appData.userId === userId) {
+                producer.close();
+                room.producers.delete(id);
+            }
+        }
 
+        // 2️⃣ Zavřít transporty
+        for (const [id, transport] of room.transports.entries()) {
+            if (transport.appData.userId === userId) {
+                transport.close();
+                room.transports.delete(id);
+            }
+        }
+
+        // 3️⃣ Zavřít consumery uživatele
+        for (const [id, consumer] of room.consumers.entries()) {
+            if (consumer.appData.userId === userId) {
+                consumer.close();
+                room.consumers.delete(id);
+            }
+        }
+
+        // 4️⃣ Odebrat uživatele z room
         room.users.delete(userId);
 
+        // 5️⃣ Oznámit ostatní
         socket.to(roomId).emit('user-disconnected', userId);
 
-        // Pokud je room prázdná → smazat
+        // 6️⃣ Pokud je room prázdná → zavřít router
         if (room.users.size === 0) {
             room.router.close();
             rooms.delete(roomId);

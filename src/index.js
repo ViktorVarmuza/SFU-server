@@ -7,6 +7,7 @@ const socket = io('http://localhost:3000', {
 const ms = getMediaSoupClient();
 const device = createDevice();
 
+const streams = new Map(); // userId -> MediaStream
 
 const videoGrid = document.querySelector('.video-grid');
 const roomIdDisplay = document.querySelector('.id');
@@ -56,6 +57,8 @@ async function main() {
         { roomId: ROOM_ID }
     );
 
+    console.log('Router RTP Capabilities', rtpCapabilities);
+
     await device.load({ routerRtpCapabilities: rtpCapabilities });
 
     const sendTransportParams = await socket.emitWithAck(
@@ -68,6 +71,9 @@ async function main() {
         { roomId: ROOM_ID, direction: 'recv' }
     );
 
+    console.log('Send Transport Params', sendTransportParams);
+    console.log('Recv Transport Params', recvTransportParams);
+
     const sendTransport = await createSendTransport(sendTransportParams);
     recvTransport = await createRecvTransport(recvTransportParams);
 
@@ -75,6 +81,8 @@ async function main() {
     const allProducers = await socket.emitWithAck('getAllProducers', {
         roomId: ROOM_ID
     });
+
+    console.log('All Producers', allProducers);
 
     for (const { producerId, userId } of allProducers) {
         if (userId === USER_ID) continue;
@@ -104,7 +112,7 @@ async function sockets() {
 
     socket.on('user-disconnected', (userId) => {
         console.log('User disconnected: ' + userId);
-
+        removeVideo(userId);
     })
 
     socket.on('new-producer', async ({ producerId, userId }) => {
@@ -137,13 +145,22 @@ async function consumeProducer(producerId, userId) {
         rtpParameters: data.rtpParameters
     });
 
-    // 🔥 IGNORUJ AUDIO
-    if (consumer.kind !== 'video') return;
+    await socket.emitWithAck('resume-consumer', {
+        roomId: ROOM_ID,
+        consumerId: consumer.id
+    });
 
-    const stream = new MediaStream();
+    let stream = streams.get(userId);
+
+    if (!stream) {
+
+        stream = new MediaStream();
+        streams.set(userId, stream);
+
+        addVideo(stream, userId, userId);
+    }
+
     stream.addTrack(consumer.track);
-
-    addVideo(stream, userId, producerId);
 }
 
 
@@ -190,8 +207,14 @@ async function createRecvTransport(params) {
 
 }
 
-function addVideo(stream, username, producerId) {
+function removeVideo(userId) {
+    const videoTile = document.querySelector(`.video-tile[data-user-id="${userId}"]`);
+    if (videoTile) {
+        videoTile.remove();
+    }
+}
 
+function addVideo(stream, username, userId) {
 
     const video = document.createElement('video');
 
@@ -199,10 +222,9 @@ function addVideo(stream, username, producerId) {
     video.playsInline = true;
     video.autoplay = true;
 
-
     const videoTile = document.createElement('div');
     videoTile.className = 'video-tile';
-    videoTile.dataset.producerId = producerId;
+    videoTile.dataset.userId = userId;
 
     const nameTag = document.createElement('span');
     nameTag.className = 'username';
@@ -212,16 +234,11 @@ function addVideo(stream, username, producerId) {
     avatar.src = 'user.png';
     avatar.className = 'avatar';
 
-    video.addEventListener('loadedmetadata', () => {
-        video.play();
-    });
-
     videoTile.append(video);
     videoTile.append(avatar);
     videoTile.append(nameTag);
+
     videoGrid.append(videoTile);
-
-
 }
 
 let videoEnabled = true;

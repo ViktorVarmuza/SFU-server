@@ -1,5 +1,6 @@
-http://localhost:3000/room/room-123?userId=123 testovaci adresa :D
+http://localhost:3000/room/room-123?userId=123 
 
+chrome://webrtc-internals/
 
 room look - rooms.set(roomId, {
     router,
